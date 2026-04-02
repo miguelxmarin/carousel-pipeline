@@ -1,0 +1,87 @@
+{
+  "_note": "Copy this file to config.json and fill in your values. Run node scripts/onboarding.js to do this automatically.",
+
+  "creator": {
+    "name": "yourcreator",
+    "handle": "@yourcreator",
+    "niche": "Your niche — be specific. E.g. AI tools for solopreneurs",
+    "audience": "Who your ideal viewer is. Age, situation, what they struggle with.",
+    "coreMessage": "Your unique angle. What do you say that others don't?",
+    "brandVoice": "Calm & analytical | Bold & direct | Inspiring | Funny | Data-driven | Warm",
+    "contentGoal": "growth | saves | shares | comments | all"
+  },
+
+  "visualIdentity": {
+    "canvas": { "width": 1080, "height": 1350, "format": "jpeg", "quality": 96 },
+    "fonts": {
+      "headline": "Anton Bold",
+      "body": "Poppins Light",
+      "label": "Poppins Medium"
+    },
+    "colors": {
+      "black": [8, 8, 8],
+      "cream": [237, 232, 223],
+      "gold":  [255, 252, 0],
+      "white": [245, 240, 232],
+      "dim":   [175, 170, 162]
+    },
+    "slideAlternation": "odd=dark, even=light"
+  },
+
+  "postfast": {
+    "apiKey": "YOUR_POSTFAST_API_KEY",
+    "baseUrl": "https://api.postfa.st",
+    "accounts": {
+      "tiktok":    { "id": "YOUR_POSTFAST_TIKTOK_ACCOUNT_ID",    "platform": "TIKTOK" },
+      "instagram": { "id": "YOUR_POSTFAST_INSTAGRAM_ACCOUNT_ID", "platform": "INSTAGRAM" }
+    },
+    "languages": {
+      "en": {
+        "tiktok":        "YOUR_POSTFAST_TIKTOK_ACCOUNT_ID",
+        "instagram":     "YOUR_POSTFAST_INSTAGRAM_ACCOUNT_ID",
+        "offsetMinutes": 0
+      },
+      "fr": {
+        "tiktok":        "YOUR_POSTFAST_TIKTOK_ACCOUNT_ID",
+        "instagram":     "YOUR_POSTFAST_INSTAGRAM_ACCOUNT_ID",
+        "offsetMinutes": 3,
+        "_note": "FR posts 3 min after EN — avoids algorithm collision"
+      },
+      "es": {
+        "tiktok":        "YOUR_POSTFAST_TIKTOK_ACCOUNT_ID",
+        "instagram":     "YOUR_POSTFAST_INSTAGRAM_ACCOUNT_ID",
+        "offsetMinutes": 6,
+        "_note": "ES posts 6 min after EN"
+      }
+    }
+  },
+
+  "posting": {
+    "postsPerDay": 3,
+    "postingLanguage": "en",
+    "multilingualEnabled": false,
+    "languages": ["en"],
+    "times": ["09:00", "13:00", "18:00"],
+    "timezone": "America/New_York",
+    "platforms": ["tiktok", "instagram"],
+    "totalDailyPosts": 3,
+    "_note": "postingLanguage: en|fr|es. multilingualEnabled: true = post all 3 languages per slot."
+  },
+
+  "googleDrive": {
+    "enabled": false,
+    "rootFolderName": "CLAUDE AGENT CAROUSEL PDFS",
+    "credentialsFile": "credentials/google-credentials.json",
+    "tokenFile": "credentials/google-token.json",
+    "_note": "See credentials/README.txt for setup instructions"
+  },
+
+  "paths": {
+    "posts": "posts/",
+    "reports": "reports/",
+    "competitorResearch": "competitor-research.json",
+    "hookPerformance": "hook-performance.json"
+  },
+
+  "_setupDate": "YYYY-MM-DDTHH:MM:SS.000Z"
+}
