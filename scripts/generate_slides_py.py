@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 generate_slides_py.py
-Generates carousel slides: Kie.ai backgrounds + smart Pillow text overlay.
+Generates carousel slides: Pinterest backgrounds + smart Pillow text overlay.
 
 Rules (never break these):
 - NO blanket dark overlay. The photo IS the slide.
@@ -14,11 +14,9 @@ Rules (never break these):
 """
 
 import argparse
-import io, json, sys, time, urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json, sys, urllib.request
 from pathlib import Path
 
-import requests
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageStat
 
 # ── PATHS ─────────────────────────────────────────────────────────────────────
@@ -45,9 +43,6 @@ SAFE_W = int(W * (1 - SAFE_RIGHT_MARGIN))  # 939 px
 
 # Footer area at bottom that text must not overlap
 FOOTER_RESERVE = 140
-
-API_KEY  = CONFIG["imageGen"]["apiKey"]
-KIE_BASE = "https://api.kie.ai"
 
 # ── FONTS ─────────────────────────────────────────────────────────────────────
 FONT_URLS = {
@@ -333,8 +328,17 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_w: int,
 
 # ── TEXT OVERLAY ──────────────────────────────────────────────────────────────
 
+SWIPE_LABELS = {
+    "en": "SWIPE FOR MORE  ›",
+    "fr": "BALAYEZ POUR PLUS  ›",
+    "es": "DESLIZA PARA MÁS  ›",
+}
+
+RED_TRENDING = (220, 38, 38)   # vivid red pill on hook slide
+
+
 def add_overlay(bg_path: Path, slide: dict, fonts: dict, out_path: Path,
-                total_slides: int):
+                total_slides: int, lang: str = "en"):
     """
     Full-image single overlay system.
 
@@ -536,37 +540,45 @@ def add_overlay(bg_path: Path, slide: dict, fonts: dict, out_path: Path,
             y += b_line_h
 
     if is_hook:
-        # ── Hook footer: brand mark + solid "SWIPE FOR MORE" pill ────────────
+        # ── Hook footer: red TRENDING pill + SWIPE pill ───────────────────────
         # No separator line — the hard panel cut is already a clean boundary.
 
-        # Brand mark CREATOR_HANDLE — centered on full width
-        brand_font = fonts["label"]
-        bw = draw.textbbox((0, 0), CREATOR_HANDLE, font=brand_font)
-        bx = (W - (bw[2] - bw[0])) // 2
-        draw.text((bx - bw[0], hook_panel_y + 10 - bw[1]), CREATOR_HANDLE,
-                  font=brand_font, fill=(220, 220, 220))
+        # Red "TRENDING" pill — centered in hook panel (replaces @handle)
+        trend_font  = fonts["label"]
+        tb          = draw.textbbox((0, 0), "TRENDING", font=trend_font)
+        t_w, t_h    = tb[2] - tb[0], tb[3] - tb[1]
+        tp_x, tp_y  = 24, 10
+        tpill_w     = t_w + tp_x * 2
+        tpill_h     = t_h + tp_y * 2
+        tpill_x     = (W - tpill_w) // 2
+        tpill_y     = hook_panel_y + 8
+        draw.rounded_rectangle(
+            [tpill_x, tpill_y, tpill_x + tpill_w, tpill_y + tpill_h],
+            radius=tpill_h // 2, fill=RED_TRENDING,
+        )
+        draw.text((tpill_x + tp_x - tb[0], tpill_y + tp_y - tb[1]),
+                  "TRENDING", font=trend_font, fill=(255, 255, 255))
 
-        # "SWIPE FOR MORE ›" pill — bottom-right, transparent fill, white border + text
-        cta       = "SWIPE FOR MORE  ›"
-        cta_font  = fonts["label"]
-        cb        = draw.textbbox((0, 0), cta, font=cta_font)
-        cta_w     = cb[2] - cb[0]
-        cta_h     = cb[3] - cb[1]
+        # Language-aware "SWIPE FOR MORE ›" pill — white border, centered
+        cta         = SWIPE_LABELS.get(lang, SWIPE_LABELS["en"])
+        cta_font    = fonts["label"]
+        cb          = draw.textbbox((0, 0), cta, font=cta_font)
+        cta_w, cta_h = cb[2] - cb[0], cb[3] - cb[1]
         pill_pad_x, pill_pad_y = 28, 14
-        pill_w    = cta_w + pill_pad_x * 2
-        pill_h    = cta_h + pill_pad_y * 2
-        pill_x    = (W - pill_w) // 2            # centered on full width
-        pill_y    = H - pill_h - 80
-        draw.rounded_rectangle([pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
-                                radius=pill_h // 2, outline=(255, 255, 255), width=2)
-        # Subtract bbox offsets so text is pixel-perfect centered in the pill
+        pill_w      = cta_w + pill_pad_x * 2
+        pill_h      = cta_h + pill_pad_y * 2
+        pill_x      = (W - pill_w) // 2
+        pill_y      = H - pill_h - 80
+        draw.rounded_rectangle(
+            [pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
+            radius=pill_h // 2, outline=(255, 255, 255), width=2,
+        )
         draw.text((pill_x + pill_pad_x - cb[0], pill_y + pill_pad_y - cb[1]),
                   cta, font=cta_font, fill=(255, 255, 255))
     else:
-        # ── Standard footer: gold rule + @handle ─────────────────────────────
+        # ── Standard footer: gold rule only (no @handle) ─────────────────────
         footer_y = H - 90
         draw.rectangle([TEXT_X, footer_y, TEXT_X + 50, footer_y + 4], fill=GOLD)
-        draw.text((TEXT_X, footer_y + 14), CREATOR_HANDLE, font=fonts["footer"], fill=DIM)
 
     # ── Slide counter — skip on hook (cover slide never shows "1/N") ──────────
     if not is_hook:
@@ -575,140 +587,15 @@ def add_overlay(bg_path: Path, slide: dict, fonts: dict, out_path: Path,
     img.save(out_path, "JPEG", quality=JPEG_Q)
     print(f"  [OK] Slide {n} saved -> {out_path.name}")
 
-# ── KIE.AI IMAGE GENERATION ───────────────────────────────────────────────────
-
-# ── BRAND VISUAL SYSTEM: Abstract Editorial Textures ─────────────────────────
-# Dark slides  → deep near-black backgrounds with varied abstract textures
-# Light slides → warm cream/off-white backgrounds with varied abstract textures
-# No photography. No people. No scenes. Pure texture and form.
-# Varied per slide number so no two consecutive slides look identical,
-# but all share the same premium, minimal, editorial feel.
-
-SUFFIX = (
-    "Minimal. Clean. No text, no people, no faces, no logos, no watermarks, "
-    "no photography, no recognisable objects or scenes. "
-    "Abstract texture only. Premium editorial feel. 4:5 ratio."
-)
-
-DARK_TEXTURES = [
-    "Deep near-black background with layered fine film grain. Faint ink wash dissolving into shadow. Subtle vignette at edges.",
-    "Charcoal abstract gradient shifting from near-black to deep grey. Geometric noise overlay. Soft radial blur at center.",
-    "Dark ink bleed on black. Organic spreading form with soft edges. Heavy grain texture throughout.",
-    "Abstract dark background. Intersecting geometric planes in near-black and dark charcoal. Fine noise. Depth through shadow.",
-    "Near-black with a faint warm ember glow bleeding from the lower third. Grain texture. Moody, minimal.",
-    "Dark smoked glass texture. Subtle reflections of light on near-black surface. Fine noise. Cold and precise.",
-    "Abstract charcoal wash with paint strokes dissolving into black. Layered grain. Depth without detail.",
-]
-
-LIGHT_TEXTURES = [
-    "Warm cream background with soft gaussian noise. Subtle off-white geometric shapes dissolving at edges.",
-    "Pale warm gradient from cream to soft ivory. Light paper grain texture. Faint bloom at upper center.",
-    "Off-white abstract texture. Soft ink splash in pale gold and cream tones. Fine grain overlay. Airy.",
-    "Light abstract background. Geometric forms in warm white and cream. Noise texture. Soft and editorial.",
-    "Cream with a faint warm amber wash at one corner. Paper grain. Minimal geometric tension.",
-    "Soft warm gradient. Pale cream tones with a very faint cool undertone. Subtle gaussian noise throughout.",
-    "Light abstract wash. Cream and warm off-white paint strokes layered softly. Grain texture. Open and clean.",
-]
-
-
-def bg_prompt(slide: dict, topic: str) -> str:
-    """Return a Kie.ai prompt for an abstract editorial background texture."""
-    is_dark  = slide.get("theme", "dark") == "dark"
-    n        = slide.get("number", 1)
-    textures = DARK_TEXTURES if is_dark else LIGHT_TEXTURES
-    texture  = textures[(n - 1) % len(textures)]
-    return f"Abstract editorial background texture for a social media carousel slide. {texture} {SUFFIX}"
-
-
-def _kie_poll(task_id: str, timeout: int = 360) -> str | None:
-    """Poll Kie.ai /recordInfo until complete. Returns image URL or None."""
-    headers  = {"Authorization": f"Bearer {API_KEY}"}
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        r = requests.get(
-            f"{KIE_BASE}/api/v1/jobs/recordInfo",
-            params={"taskId": task_id},
-            headers=headers,
-            timeout=30,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            task = data.get("data", data)
-            state = str(task.get("state", task.get("status", ""))).lower()
-            if state in ("success", "completed", "succeed"):
-                # Extract from resultJson.resultUrls[0]
-                result_json = task.get("resultJson") or {}
-                if isinstance(result_json, str):
-                    try:
-                        result_json = json.loads(result_json)
-                    except Exception:
-                        result_json = {}
-                urls = result_json.get("resultUrls") or []
-                if urls:
-                    return urls[0]
-                # Fallback: try top-level fields
-                for field in ("imageUrl", "image_url", "url", "output"):
-                    val = task.get(field)
-                    if val and isinstance(val, str):
-                        return val
-                print(f"  [WARN] Task done but no URL found. data={str(data)[:300]}")
-                return None
-            elif state in ("failed", "error"):
-                print(f"  [ERR] Task failed: {str(data)[:300]}")
-                return None
-        time.sleep(6)
-    print(f"  [ERR] Timeout for task {task_id}")
-    return None
-
-
-def submit_task(slide: dict, topic: str) -> tuple[int, str | None]:
-    """Submit one slide to Kie.ai. Returns (slide_number, task_id)."""
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "nano-banana-2",
-        "input": {
-            "prompt":       bg_prompt(slide, topic),
-            "aspect_ratio": "4:5",
-            "resolution":   "2K",
-            "output_format": "jpg",
-        },
-    }
-    r = requests.post(f"{KIE_BASE}/api/v1/jobs/createTask",
-                      headers=headers, json=payload, timeout=60)
-    if r.status_code != 200:
-        print(f"  [ERR] Slide {slide['number']} submit {r.status_code}: {r.text[:200]}")
-        return slide["number"], None
-    data    = r.json()
-    task_id = (data.get("data") or {}).get("taskId") or data.get("taskId")
-    if not task_id:
-        print(f"  [ERR] Slide {slide['number']} no taskId: {str(data)[:200]}")
-        return slide["number"], None
-    print(f"  Slide {slide['number']} submitted -> {task_id}")
-    return slide["number"], task_id
-
-
-def poll_all(task_map: dict[int, str]) -> dict[int, str | None]:
-    """Poll all tasks concurrently. Returns {slide_num: image_url}."""
-    def poll_one(num, tid):
-        return num, _kie_poll(tid)
-
-    results = {}
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = {ex.submit(poll_one, n, tid): n for n, tid in task_map.items()}
-        for f in as_completed(futures):
-            n, url = f.result()
-            results[n] = url
-            print(f"  Slide {n} ready: {'got URL' if url else 'NO IMAGE'}")
-    return results
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate carousel slides with Kie.ai backgrounds.")
+    parser = argparse.ArgumentParser(description="Generate carousel slides with Pinterest backgrounds.")
     parser.add_argument("post_dir", nargs="?", default=None,
                         help="Path to the post slot directory (contains carousel.json)")
-    parser.add_argument("--lang", default="en", choices=["en", "fr", "es"],
-                        help="Language version to generate (default: en)")
+    parser.add_argument("--lang", default="en", choices=["en", "fr", "es", "x"],
+                        help="Language version to generate (default: en). Use 'x' for the 4-slide X synthesis.")
     args = parser.parse_args()
 
     post_dir = Path(args.post_dir) if args.post_dir else ROOT / "posts" / "2026-03-26" / "0600"
@@ -716,8 +603,8 @@ def main():
 
     carousel = json.loads((post_dir / "carousel.json").read_text(encoding="utf-8"))
 
-    # Support both multi-lang format (has "en"/"fr"/"es" keys) and old flat format
-    is_multilang = "en" in carousel or "fr" in carousel or "es" in carousel
+    # Support both multi-lang format (has "en"/"fr"/"es"/"x" keys) and old flat format
+    is_multilang = any(k in carousel for k in ("en", "fr", "es", "x"))
     if is_multilang:
         lang_data = carousel.get(lang, carousel.get("en", {}))
         slides    = lang_data.get("slides", [])
@@ -726,87 +613,79 @@ def main():
         slides  = carousel["slides"]
         caption = carousel.get("caption", "")
 
+    if not slides:
+        print(f"[ERROR] No slides found for lang={lang} in {post_dir / 'carousel.json'}")
+        sys.exit(1)
+
     total      = len(slides)
     slides_dir = post_dir / "slides"
     slides_dir.mkdir(exist_ok=True)
-    topic      = carousel.get("meta", {}).get("topic", "AI and productivity")
 
-    # Language-specific finals subdir; raw backgrounds are shared (no lang subdir)
+    # Topic: X synthesis may have different topic; fall back to EN meta
     if is_multilang:
-        finals_dir = slides_dir / lang
-        finals_dir.mkdir(exist_ok=True)
+        topic = lang_data.get("meta", {}).get("topic", "") or \
+                carousel.get("en", {}).get("meta", {}).get("topic", "AI and productivity")
     else:
-        finals_dir = slides_dir
+        topic = carousel.get("meta", {}).get("topic", "AI and productivity")
+
+    # Language-specific finals subdir.
+    # X uses slides/x/ with its own raw backgrounds (different content from EN/FR/ES).
+    # EN/FR/ES share the same raw backgrounds in slides/.
+    finals_dir = slides_dir / lang
+    finals_dir.mkdir(exist_ok=True)
+
+    # For X: raw backgrounds live in slides/x-raw/ (separate from EN/FR/ES pool)
+    # For EN: raw backgrounds live in slides/ (shared with FR/ES)
+    if lang == "x":
+        x_raw_dir = slides_dir / "x-raw"
+        x_raw_dir.mkdir(exist_ok=True)
+        bg_base_dir = x_raw_dir
+    else:
+        bg_base_dir = slides_dir
 
     print(f"\nGenerating {total} slides for: {topic[:60]}...")
-    if is_multilang:
-        print(f"Language: {lang.upper()}")
+    print(f"Language: {lang.upper()}")
     fonts = ensure_fonts()
     print("Fonts ready.\n")
 
-    # Step 1: Submit Kie.ai tasks — skip if Pinterest backgrounds already exist
-    # Raw backgrounds are shared across EN/FR/ES (same image, different text overlay)
-    need_new_bgs = (not is_multilang) or (lang == "en")
-
-    if need_new_bgs:
-        # Check which slides already have Pinterest backgrounds downloaded
-        slides_needing_bg = [
-            s for s in slides
-            if not (slides_dir / f"slide-{s['number']:02d}-raw.jpg").exists()
-        ]
-        slides_with_bg = total - len(slides_needing_bg)
-
-        if slides_with_bg > 0:
-            print(f"Pinterest backgrounds found: {slides_with_bg}/{total} slides already have raw backgrounds.")
-        if slides_needing_bg:
-            print(f"Submitting {len(slides_needing_bg)}/{total} slides to Kie.ai (no Pinterest bg)...")
+    # Raw Pinterest backgrounds check
+    # EN/FR/ES share the same raw backgrounds (slides/slide-NN-raw.jpg)
+    # X has its own raw backgrounds (slides/x-raw/slide-NN-raw.jpg)
+    need_bgs_check = lang in ("en", "x")
+    if need_bgs_check:
+        slides_with_bg = sum(
+            1 for s in slides
+            if (bg_base_dir / f"slide-{s['number']:02d}-raw.jpg").exists()
+        )
+        if slides_with_bg == total:
+            print(f"Pinterest backgrounds ready: {slides_with_bg}/{total} slides.")
+        elif slides_with_bg > 0:
+            print(f"Pinterest backgrounds: {slides_with_bg}/{total} slides. "
+                  f"{total - slides_with_bg} missing — run fetch_backgrounds.py first.")
         else:
-            print(f"All {total} slides have Pinterest backgrounds — skipping Kie.ai entirely.")
-
-        if slides_needing_bg:
-            with ThreadPoolExecutor(max_workers=10) as ex:
-                futures  = [ex.submit(submit_task, slide, topic) for slide in slides_needing_bg]
-                task_map = {n: tid for n, tid in (f.result() for f in futures) if tid}
-
-            print(f"\n{len(task_map)}/{len(slides_needing_bg)} tasks submitted. Polling for results...\n")
-            url_map = poll_all(task_map)
-        else:
-            url_map = {}
+            print(f"[WARN] No Pinterest backgrounds found — slides will use solid color fallback.")
+            if lang == "x":
+                print(f"  Run: python scripts/fetch_backgrounds.py --slot-dir {post_dir} --lang x")
+            else:
+                print(f"  Run: python scripts/fetch_backgrounds.py --slot-dir {post_dir}")
     else:
-        print(f"Reusing shared raw backgrounds (lang={lang}, BGs generated for EN).")
-        url_map = {}
+        print(f"Reusing shared Pinterest backgrounds (lang={lang} reuses EN raw backgrounds).")
 
-    # Step 3: Per-slide: download + analyze + overlay
+    # Apply text overlays — uses raw Pinterest bg if available, solid color fallback otherwise
     print("\nApplying smart text overlays (per-slide analysis)...")
     for slide in slides:
         n          = slide["number"]
-        raw_path   = slides_dir / f"slide-{n:02d}-raw.jpg"   # shared, no lang subdir
-        final_path = finals_dir / f"slide-{n:02d}-final.jpg"
-
-        img_url = url_map.get(n)
-        if img_url:
-            try:
-                img_bytes = requests.get(img_url, timeout=60).content
-                raw_img   = Image.open(io.BytesIO(img_bytes)).resize((W, H), Image.LANCZOS)
-                raw_img.save(raw_path, "JPEG", quality=JPEG_Q)
-            except Exception as e:
-                print(f"  [WARN] Could not download bg for slide {n}: {e}")
-                img_url = None
-
-        # If no new background was generated (e.g. credits exhausted or reuse mode),
-        # reuse any existing raw background so the overlay system still runs on a real
-        # texture instead of falling back to flat color.
-        if not img_url and raw_path.exists():
-            print(f"  [REUSE] No new bg for slide {n} — reusing existing raw background.")
-            img_url = True  # signal that a bg file is available
+        raw_path   = bg_base_dir / f"slide-{n:02d}-raw.jpg"
+        final_path = finals_dir  / f"slide-{n:02d}-final.jpg"
 
         print(f"\n  -- Slide {n} ({slide.get('role','?')}) --")
         add_overlay(
-            bg_path      = raw_path if img_url else None,
+            bg_path      = raw_path if raw_path.exists() else None,
             slide        = slide,
             fonts        = fonts,
             out_path     = final_path,
             total_slides = total,
+            lang         = lang,
         )
 
     print(f"\n[DONE] {total} slides saved to: {finals_dir}")

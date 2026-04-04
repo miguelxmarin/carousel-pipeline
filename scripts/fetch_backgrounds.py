@@ -3,7 +3,7 @@ fetch_backgrounds.py
 --------------------
 Downloads Pinterest images as slide backgrounds for a carousel slot.
 
-Pinterest photos replace Kie.ai abstract textures — one photo per slide that
+Pinterest photos as slide backgrounds — one photo per slide that
 visually matches what the slide is talking about. Same background is reused
 across EN/FR/ES language versions (only text + auto-music vary).
 
@@ -12,7 +12,7 @@ Workflow:
      ("fog blur dark aesthetic", "clean minimal desk light", etc.)
   2. Claude opens pinterest.com in Chrome, searches each bgQuery, picks best photo
   3. Run this script with the Pinterest image URL to download + save as raw background
-  4. generate_slides_py.py sees raw file already exists → skips Kie.ai → overlays text
+  4. generate_slides_py.py sees raw file already exists → overlays text
 
 Usage:
   # Print all bgQuery values Claude should search on Pinterest
@@ -139,8 +139,10 @@ def get_slot_dir(slot_dir_arg: str) -> Path:
     return p
 
 
-def get_raw_path(slot_dir: Path, slide_num: int) -> Path:
+def get_raw_path(slot_dir: Path, slide_num: int, lang: str = "en") -> Path:
     """Return the path where a raw background should be saved."""
+    if lang == "x":
+        return slot_dir / "slides" / "x-raw" / f"slide-{slide_num:02d}-raw.jpg"
     return slot_dir / "slides" / f"slide-{slide_num:02d}-raw.jpg"
 
 
@@ -152,11 +154,14 @@ def read_carousel(slot_dir: Path) -> dict:
     return json.loads(carousel_path.read_text(encoding="utf-8"))
 
 
-def get_slides(carousel: dict) -> list[dict]:
+def get_slides(carousel: dict, lang: str = "en") -> list[dict]:
     """
     Extract the slides list from carousel.json.
-    Supports both flat format and multi-lang format (uses EN as reference).
+    Supports both flat format and multi-lang format.
+    lang="x" returns X synthesis slides.
     """
+    if lang == "x":
+        return carousel.get("x", {}).get("slides", [])
     if "en" in carousel:
         return carousel["en"].get("slides", [])
     if "slides" in carousel:
@@ -168,22 +173,23 @@ def get_slides(carousel: dict) -> list[dict]:
 # Commands
 # ---------------------------------------------------------------------------
 
-def cmd_list(slot_dir: Path) -> None:
+def cmd_list(slot_dir: Path, lang: str = "en") -> None:
     """Print bgQuery for each slide so Claude knows what to search on Pinterest."""
     carousel = read_carousel(slot_dir)
-    slides   = get_slides(carousel)
+    slides   = get_slides(carousel, lang)
 
+    label = f"X synthesis (4 slides)" if lang == "x" else f"EN/FR/ES (main slides)"
     print(f"\n{'='*60}")
-    print(f"  Pinterest search queries  |  {slot_dir.parent.name}/{slot_dir.name}")
+    print(f"  Pinterest search queries  |  {slot_dir.parent.name}/{slot_dir.name}  [{label}]")
     print(f"{'='*60}")
     print(f"{'Slide':<8} {'Theme':<8} {'bgQuery'}")
     print(f"{'-'*60}")
 
     for slide in slides:
         num     = slide.get("number", "?")
-        theme   = "dark" if int(str(num)) % 2 == 1 else "light"
+        theme   = slide.get("theme", "dark" if int(str(num)) % 2 == 1 else "light")
         query   = slide.get("bgQuery", "")
-        raw_exists = get_raw_path(slot_dir, int(str(num))).exists()
+        raw_exists = get_raw_path(slot_dir, int(str(num)), lang).exists()
         status  = "[OK]" if raw_exists else "[need]"
 
         if query:
@@ -191,27 +197,29 @@ def cmd_list(slot_dir: Path) -> None:
         else:
             print(f"  {num:<6} {theme:<8} {status}  (no bgQuery — add to carousel.json)")
 
+    lang_flag = " --lang x" if lang == "x" else ""
     print()
     print("Search on Pinterest:  https://www.pinterest.com/search/pins/?q=QUERY")
-    print("Then run:  --slide N --url https://i.pinimg.com/...")
+    print(f"Then run:  --slide N --url https://i.pinimg.com/...{lang_flag}")
     print()
 
 
-def cmd_status(slot_dir: Path) -> None:
+def cmd_status(slot_dir: Path, lang: str = "en") -> None:
     """Show which slides have backgrounds and which still need them."""
     carousel = read_carousel(slot_dir)
-    slides   = get_slides(carousel)
+    slides   = get_slides(carousel, lang)
     done, missing = [], []
 
     for slide in slides:
         num = slide.get("number", "?")
-        raw_path = get_raw_path(slot_dir, int(str(num)))
+        raw_path = get_raw_path(slot_dir, int(str(num)), lang)
         if raw_path.exists():
             done.append(num)
         else:
             missing.append(num)
 
-    print(f"\n  Slot: {slot_dir.parent.name}/{slot_dir.name}")
+    label = " [X]" if lang == "x" else ""
+    print(f"\n  Slot: {slot_dir.parent.name}/{slot_dir.name}{label}")
     print(f"  Done:    slides {done}")
     print(f"  Missing: slides {missing}")
     if not missing:
@@ -219,9 +227,9 @@ def cmd_status(slot_dir: Path) -> None:
     print()
 
 
-def cmd_save(slot_dir: Path, slide_num: int, url: str, force: bool = False) -> None:
+def cmd_save(slot_dir: Path, slide_num: int, url: str, force: bool = False, lang: str = "en") -> None:
     """Download a Pinterest image and save it as the raw background for a slide."""
-    dest = get_raw_path(slot_dir, slide_num)
+    dest = get_raw_path(slot_dir, slide_num, lang)
 
     if dest.exists() and not force:
         print(f"  Slide {slide_num} already has a background: {dest}")
@@ -254,17 +262,18 @@ def cmd_save(slot_dir: Path, slide_num: int, url: str, force: bool = False) -> N
     print(f"  Original: {orig_size[0]}x{orig_size[1]}px  →  {CANVAS_W}x{CANVAS_H}px (cropped)")
 
 
-def cmd_map(slot_dir: Path, mapping: dict, force: bool = False) -> None:
+def cmd_map(slot_dir: Path, mapping: dict, force: bool = False, lang: str = "en") -> None:
     """Download multiple Pinterest images from a {slide_num: url} mapping."""
-    print(f"\n  Saving {len(mapping)} backgrounds for {slot_dir.parent.name}/{slot_dir.name}")
+    label = " [X]" if lang == "x" else ""
+    print(f"\n  Saving {len(mapping)} backgrounds for {slot_dir.parent.name}/{slot_dir.name}{label}")
     print()
 
     for slide_num_str, url in mapping.items():
         slide_num = int(slide_num_str)
-        cmd_save(slot_dir, slide_num, url, force=force)
+        cmd_save(slot_dir, slide_num, url, force=force, lang=lang)
 
     print()
-    cmd_status(slot_dir)
+    cmd_status(slot_dir, lang)
 
 
 # ---------------------------------------------------------------------------
@@ -304,15 +313,19 @@ def main():
         "--force", action="store_true",
         help="Overwrite existing background files",
     )
+    parser.add_argument(
+        "--lang", default="en", choices=["en", "x"],
+        help="Which slide set to target: 'en' = main 9 slides (shared EN/FR/ES), 'x' = X 4-slide synthesis (default: en)",
+    )
     args = parser.parse_args()
 
     slot_dir = get_slot_dir(args.slot_dir)
 
     if args.list:
-        cmd_list(slot_dir)
+        cmd_list(slot_dir, lang=args.lang)
 
     elif args.status:
-        cmd_status(slot_dir)
+        cmd_status(slot_dir, lang=args.lang)
 
     elif args.map:
         try:
@@ -320,10 +333,10 @@ def main():
         except json.JSONDecodeError as e:
             print(f"ERROR: invalid --map JSON: {e}")
             sys.exit(1)
-        cmd_map(slot_dir, mapping, force=args.force)
+        cmd_map(slot_dir, mapping, force=args.force, lang=args.lang)
 
     elif args.slide and args.url:
-        cmd_save(slot_dir, args.slide, args.url, force=args.force)
+        cmd_save(slot_dir, args.slide, args.url, force=args.force, lang=args.lang)
 
     else:
         parser.print_help()

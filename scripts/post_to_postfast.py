@@ -1,14 +1,26 @@
 """
 post_to_postfast.py
 -------------------
-Upload carousel slides to PostFast and schedule them on TikTok + Instagram.
+Upload carousel slides to PostFast and schedule to all connected platforms.
+
+PLATFORM ROUTING:
+  TikTok    — FR + EN + ES  (FR first at slot time, EN +60 min, ES +120 min)
+  Instagram — FR + EN + ES  (FR first at slot time, EN +60 min, ES +120 min)
+  LinkedIn  — EN only       (posted at slot time, no offset)
+  X         — EN only       (4-slide original synthesis: hook/problem/solution/CTA)
+
+Daily schedule (2 posts/day):
+  Slot 1: 07:30 (best engagement: 258 avg views)
+  Slot 2: 13:00 (best engagement: 263 avg views)
+  FR posts at slot time, EN +60 min after FR, ES +120 min after FR.
 
 Usage:
   python scripts/post_to_postfast.py                     # all today's slots
-  python scripts/post_to_postfast.py --slot 0600         # one slot
+  python scripts/post_to_postfast.py --slot 0730         # one slot
   python scripts/post_to_postfast.py --date 2026-03-27   # specific date
   python scripts/post_to_postfast.py --now               # post immediately
   python scripts/post_to_postfast.py --dry-run           # validate only
+  python scripts/post_to_postfast.py --lang fr           # FR language run
 """
 
 import argparse
@@ -35,22 +47,34 @@ BASE_URL = "https://api.postfa.st"
 TZ       = ZoneInfo(CONFIG["posting"]["timezone"])
 
 
-def get_account_ids(lang: str = "en") -> tuple[str | None, str | None, int]:
+def get_account_ids(lang: str = "en") -> tuple[str | None, str | None, str | None, str | None, int]:
     """
-    Return (tiktok_id, instagram_id, offset_minutes) for a given language.
-    All languages post to the same accounts (configured in config.postfast.languages).
+    Return (tiktok_id, instagram_id, linkedin_id, x_id, offset_minutes) for a language.
+    LinkedIn and X only post once (EN slot) — they are ignored for FR/ES runs.
     offsetMinutes staggers EN/FR/ES so they don't hit the algorithm simultaneously:
       EN = slot time + 0 min
       FR = slot time + 3 min
       ES = slot time + 6 min
     Falls back to EN accounts + 0 offset if the language block is missing.
     """
-    lang_cfg = CONFIG.get("postfast", {}).get("languages", {}).get(lang, {})
+    lang_cfg  = CONFIG.get("postfast", {}).get("languages", {}).get(lang, {})
+    accounts  = CONFIG.get("postfast", {}).get("accounts", {})
+
     if not lang_cfg:
-        # Fallback: use default EN accounts
-        default = CONFIG["postfast"]["accounts"]
-        return default["tiktok"]["id"], default["instagram"]["id"], 0
-    return lang_cfg.get("tiktok"), lang_cfg.get("instagram"), lang_cfg.get("offsetMinutes", 0)
+        default = accounts
+        tiktok_id    = default.get("tiktok", {}).get("id")
+        instagram_id = default.get("instagram", {}).get("id")
+    else:
+        tiktok_id    = lang_cfg.get("tiktok")
+        instagram_id = lang_cfg.get("instagram")
+
+    # LinkedIn and X only post for the primary (EN) slot — skip for FR/ES
+    linkedin_id = accounts.get("linkedin", {}).get("id") if lang == "en" else None
+    x_id        = accounts.get("x", {}).get("id")        if lang == "en" else None
+
+    offset = lang_cfg.get("offsetMinutes", 0) if lang_cfg else 0
+    return tiktok_id, instagram_id, linkedin_id, x_id, offset
+
 
 HEADERS = {"pf-api-key": API_KEY, "Content-Type": "application/json"}
 
@@ -103,36 +127,57 @@ def upload_image(image_path: Path) -> str:
 # ── Post creation ───────────────────────────────────────────────────────────
 
 def build_payload(
-    tiktok_keys: list[str],
-    instagram_keys: list[str],
-    caption: str,
+    keys_full: list[str],        # all 9 slides → TikTok, Instagram, LinkedIn
+    keys_x: list[str],           # 4 synthesized slides → X only
+    caption: str,                # caption for TikTok / Instagram / LinkedIn
+    x_caption: str,              # caption for X (shorter, synthesized)
     scheduled_at: str,
     post_now: bool,
     tiktok_id: str | None = None,
     instagram_id: str | None = None,
+    linkedin_id: str | None = None,
+    x_id: str | None = None,
 ) -> dict:
     status = "SCHEDULED"
     sched  = scheduled_at
+    posts  = []
 
-    posts = []
+    def _media(keys):
+        return [{"key": k, "type": "IMAGE", "sortOrder": i} for i, k in enumerate(keys)]
 
-    if tiktok_id and tiktok_keys:
-        tiktok_media = [{"key": k, "type": "IMAGE", "sortOrder": i} for i, k in enumerate(tiktok_keys)]
+    if tiktok_id and keys_full:
         posts.append({
             "socialMediaId": tiktok_id,
             "content":       caption,
-            "mediaItems":    tiktok_media,
+            "mediaItems":    _media(keys_full),
             "status":        status,
             **({"scheduledAt": sched} if sched else {}),
         })
 
-    if instagram_id and instagram_keys:
-        instagram_media = [{"key": k, "type": "IMAGE", "sortOrder": i} for i, k in enumerate(instagram_keys)]
+    if instagram_id and keys_full:
         posts.append({
-            "socialMediaId":        instagram_id,
-            "content":              caption,
-            "mediaItems":           instagram_media,
-            "status":               status,
+            "socialMediaId": instagram_id,
+            "content":       caption,
+            "mediaItems":    _media(keys_full),
+            "status":        status,
+            **({"scheduledAt": sched} if sched else {}),
+        })
+
+    if linkedin_id and keys_full:
+        posts.append({
+            "socialMediaId": linkedin_id,
+            "content":       caption,
+            "mediaItems":    _media(keys_full),
+            "status":        status,
+            **({"scheduledAt": sched} if sched else {}),
+        })
+
+    if x_id and keys_x:
+        posts.append({
+            "socialMediaId": x_id,
+            "content":       x_caption,
+            "mediaItems":    _media(keys_x),
+            "status":        status,
             **({"scheduledAt": sched} if sched else {}),
         })
 
@@ -189,14 +234,14 @@ def post_slot(slot_dir: Path, target_date: date, dry_run=False, post_now=False, 
 
     slot = slot_dir.name
 
-    # Find slides: for multi-lang look in slides/{lang}/ first, then fall back to slides/
     slides_dir = slot_dir / "slides"
+
+    # Find main platform slides (TikTok, Instagram, LinkedIn): slides/{lang}/
     if is_multilang:
-        lang_slides_dir = slides_dir / lang
-        if lang_slides_dir.exists():
+        lang_slides_dir = slides_dir / lang if slides_dir.exists() else None
+        if lang_slides_dir and lang_slides_dir.exists():
             image_files = sorted(lang_slides_dir.glob("slide-*-final.jpg"))
         else:
-            # Fall back to flat slides dir
             image_files = sorted(slides_dir.glob("slide-*-final.jpg")) if slides_dir.exists() else []
     else:
         search_dir  = slides_dir if slides_dir.exists() else slot_dir
@@ -207,21 +252,37 @@ def post_slot(slot_dir: Path, target_date: date, dry_run=False, post_now=False, 
         print(f"  Skipping {slot_dir.name} — no slide images (run generate_slides_py.py first)")
         return
 
-    tiktok_id, instagram_id, offset_minutes = get_account_ids(lang)
+    # X slides live in slides/x/ — original 4-slide synthesis (not a subset of main slides)
+    x_slides_dir = slides_dir / "x" if slides_dir.exists() else None
+    x_image_files = sorted(x_slides_dir.glob("slide-*-final.jpg")) if (x_slides_dir and x_slides_dir.exists()) else []
 
-    if not tiktok_id and not instagram_id:
+    # X caption: use the dedicated X synthesis caption if available
+    x_caption = None
+    if is_multilang and "x" in carousel:
+        x_caption = carousel["x"].get("caption", "")
+
+    tiktok_id, instagram_id, linkedin_id, x_id, offset_minutes = get_account_ids(lang)
+
+    if not tiktok_id and not instagram_id and not linkedin_id and not x_id:
         print(f"  Skipping {slot_dir.name} (lang={lang}) — no accounts configured for this language")
         return
+
+    # Warn if X is configured but has no synthesized slides
+    if x_id and not x_image_files:
+        print(f"  [WARN] X account configured but slides/x/ not found — run generate_slides_py.py --lang x first")
+        x_id = None  # skip X for this run
 
     print(f"\n{'='*60}")
     print(f"Slot {slot}  |  lang={lang.upper()}  |  {len(image_files)} slides")
     if tiktok_id:    print(f"  TikTok:    {tiktok_id}")
     if instagram_id: print(f"  Instagram: {instagram_id}")
+    if linkedin_id:  print(f"  LinkedIn:  {linkedin_id}")
+    if x_id:         print(f"  X:         {x_id}  ({len(x_image_files)}-slide original synthesis)")
     if offset_minutes: print(f"  Offset:    +{offset_minutes} min (staggered from EN)")
     print(f"{'='*60}")
 
-    # Upload all slides
-    print("Uploading to PostFast CDN...")
+    # Upload main slides (TikTok, Instagram, LinkedIn)
+    print("Uploading main slides to PostFast CDN...")
     keys = []
     for img in image_files:
         if dry_run:
@@ -229,7 +290,20 @@ def post_slot(slot_dir: Path, target_date: date, dry_run=False, post_now=False, 
         else:
             key = upload_image(img)
             keys.append(key)
-            time.sleep(1.5)  # pace uploads to avoid 429 rate limit
+            time.sleep(1.5)
+
+    # Upload X slides separately (original 4-slide synthesis)
+    keys_x = []
+    if x_id and x_image_files:
+        print("Uploading X synthesis slides...")
+        for img in x_image_files:
+            if dry_run:
+                keys_x.append(f"image/dry-x-{img.stem}.jpg")
+            else:
+                key = upload_image(img)
+                keys_x.append(key)
+                time.sleep(1.5)
+        print(f"  X: {len(keys_x)} slides ready")
 
     # Timing — apply per-language offset so EN/FR/ES don't post simultaneously
     from datetime import timedelta
@@ -248,9 +322,21 @@ def post_slot(slot_dir: Path, target_date: date, dry_run=False, post_now=False, 
 
     print("  TikTok:    PUBLIC + autoAddMusic")
     print("  Instagram: TIMELINE carousel")
+    if linkedin_id: print("  LinkedIn:  document carousel (9 slides)")
+    if x_id:        print("  X:         4-slide post (hook/problem/solution/CTA)")
 
-    payload = build_payload(keys, keys, caption, scheduled_iso, post_now,
-                            tiktok_id=tiktok_id, instagram_id=instagram_id)
+    payload = build_payload(
+        keys_full    = keys,
+        keys_x       = keys_x,
+        caption      = caption,
+        x_caption    = x_caption or caption,
+        scheduled_at = scheduled_iso,
+        post_now     = post_now,
+        tiktok_id    = tiktok_id,
+        instagram_id = instagram_id,
+        linkedin_id  = linkedin_id,
+        x_id         = x_id if keys_x else None,
+    )
 
     try:
         result = create_posts(payload, dry_run)

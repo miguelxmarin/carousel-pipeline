@@ -1,14 +1,18 @@
 """
 build_resource.py
 -----------------
-Renders a resource.json file from a carousel slot directory into a branded PDF.
+Renders resource.json into branded PDFs (EN + FR + ES).
 
-Each section in resource.json becomes one or more pages rendered with Pillow,
-matching the creator's visual identity (handle read from config.json). No external PDF library needed --
-Pillow's built-in PDF writer stitches the pages together.
+Supports two resource.json formats:
+  Multilang:  {"en": {...}, "fr": {...}, "es": {...}}
+              -> builds resource_en.pdf, resource_fr.pdf, resource_es.pdf
+  Flat (legacy):  {"meta": {...}, "sections": [...]}
+              -> builds resource.pdf (single language, backwards compatible)
 
 Usage:
     python scripts/build_resource.py --slot-dir posts/2026-03-30/0600
+    python scripts/build_resource.py --slot-dir posts/2026-03-30/0600 --lang en
+    python scripts/build_resource.py --slot-dir posts/2026-03-30/0600 --lang all
     python scripts/build_resource.py --slot-dir posts/2026-03-30/0600 --force
 """
 
@@ -272,69 +276,94 @@ def make_closer_page(footer_text: str, fonts: dict) -> Image.Image:
 
 # ── Main builder ───────────────────────────────────────────────────────────────
 
-def build_resource_pdf(slot_dir: Path, force: bool = False) -> Path:
-    resource_json = slot_dir / "resource.json"
-    output_pdf    = slot_dir / "resource.pdf"
-
-    if not resource_json.exists():
-        print(f"  [SKIP] No resource.json found at {resource_json}")
-        sys.exit(0)
-
-    if output_pdf.exists() and not force:
-        print(f"  [SKIP] resource.pdf already exists at {output_pdf} (use --force to overwrite)")
-        sys.exit(0)
-
-    data = json.loads(resource_json.read_text(encoding="utf-8"))
+def _render_pdf(data: dict, output_pdf: Path, fonts: dict) -> Path:
+    """Render one language block to a PDF file."""
     meta     = data.get("meta", {})
     sections = data.get("sections", [])
     footer   = data.get("footer", "")
 
     if not sections:
-        print(f"  [ERROR] resource.json has no sections.")
-        sys.exit(1)
+        print(f"  [ERROR] resource.json has no sections for {output_pdf.name}")
+        return None
 
-    print(f"  Building resource PDF: {meta.get('title', '(untitled)')}")
-    print(f"  Format  : {meta.get('format', 'unknown')}")
-    print(f"  Sections: {len(sections)}")
+    print(f"  Building: {output_pdf.name}  |  {meta.get('title', '(untitled)')}  ({len(sections)} sections)")
 
-    fonts = load_fonts()
-
-    pages = []
-    pages.append(make_cover_page(meta, fonts))
-
+    pages = [make_cover_page(meta, fonts)]
     for i, section in enumerate(sections):
         pages.append(make_section_page(section, i, len(sections), fonts))
-
     if footer:
         pages.append(make_closer_page(footer, fonts))
 
-    first_page = pages[0]
-    rest_pages = pages[1:]
-
-    first_page.save(
-        str(output_pdf),
-        format="PDF",
-        save_all=True,
-        append_images=rest_pages,
-    )
-
+    pages[0].save(str(output_pdf), format="PDF", save_all=True, append_images=pages[1:])
     print(f"  Saved  : {output_pdf}  ({len(pages)} pages)")
     return output_pdf
+
+
+def build_resource_pdf(slot_dir: Path, force: bool = False, lang: str = "all") -> list[Path]:
+    """
+    Build resource PDFs for the given slot.
+
+    lang="all"  -> build all languages present in resource.json
+    lang="en"   -> build resource_en.pdf only
+    lang="fr"   -> build resource_fr.pdf only
+    lang="es"   -> build resource_es.pdf only
+    lang=""     -> flat (legacy) format -> resource.pdf
+    """
+    resource_json = slot_dir / "resource.json"
+
+    if not resource_json.exists():
+        print(f"  [SKIP] No resource.json found at {resource_json}")
+        return []
+
+    data = json.loads(resource_json.read_text(encoding="utf-8"))
+    fonts = load_fonts()
+    built = []
+
+    # Detect multilang format
+    is_multilang = any(k in data for k in ("en", "fr", "es"))
+
+    if is_multilang:
+        langs_to_build = ["en", "fr", "es"] if lang == "all" else [lang] if lang else ["en"]
+        for lng in langs_to_build:
+            if lng not in data:
+                print(f"  [SKIP] No '{lng}' block in resource.json")
+                continue
+            out = slot_dir / f"resource_{lng}.pdf"
+            if out.exists() and not force:
+                print(f"  [SKIP] {out.name} already exists (use --force to overwrite)")
+                built.append(out)
+                continue
+            result = _render_pdf(data[lng], out, fonts)
+            if result:
+                built.append(result)
+    else:
+        # Legacy flat format
+        out = slot_dir / "resource.pdf"
+        if out.exists() and not force:
+            print(f"  [SKIP] resource.pdf already exists (use --force to overwrite)")
+            return [out]
+        result = _render_pdf(data, out, fonts)
+        if result:
+            built.append(result)
+
+    return built
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Build PDF resource from resource.json")
+    parser = argparse.ArgumentParser(description="Build PDF resources from resource.json (EN + FR + ES)")
     parser.add_argument(
-        "--slot-dir",
-        required=True,
+        "--slot-dir", required=True,
         help="Path to the slot directory (e.g. posts/2026-03-30/0600)",
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite existing resource.pdf",
+        "--lang", default="all", choices=["all", "en", "fr", "es"],
+        help="Language to build: 'all' builds EN+FR+ES (default), or specify one.",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Overwrite existing PDF files",
     )
     args = parser.parse_args()
 
@@ -346,7 +375,9 @@ def main():
         print(f"  [ERROR] Slot directory not found: {slot_dir}")
         sys.exit(1)
 
-    build_resource_pdf(slot_dir, force=args.force)
+    built = build_resource_pdf(slot_dir, force=args.force, lang=args.lang)
+    if not built:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

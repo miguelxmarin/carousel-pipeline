@@ -6,20 +6,23 @@ Chains all steps in sequence with clear logging and error handling.
 
 Steps:
   1. research_sweep.py    -- scrape today's topics
-  2. generate_content.py  -- write all 10 carousels via OpenAI
-  3. generate_slides_py.py -- generate Kie.ai backgrounds + Pillow overlays
+  2. [Claude Code]        -- generates carousel.json files directly (no script needed)
+     generate_content.py  -- validate existing carousel.json files
+  3. generate_slides_py.py -- fetch Pinterest backgrounds + Pillow overlays
                               (for multi-lang carousel.json: generates for each --lang)
-  3.5 build_resource.py   -- build PDF resource for each slot
-  4. post_to_postfast.py  -- schedule all 10 posts per language (no --now flag)
+  3.5 build_resource.py   -- build trilingual PDFs (EN + FR + ES) for each slot
+  3.7 upload_to_drive.py  -- upload all 3 PDFs to Google Drive, save links to carousel.json
+  4. post_to_postfast.py  -- schedule all posts (FR first, EN +60 min, ES +120 min)
   5. analytics_pull.py    -- update hook-performance.json (optional, --analytics flag)
 
 Usage:
-  python scripts/daily_run.py                       # run for today (EN only)
+  python scripts/daily_run.py                       # run for today (all langs)
   python scripts/daily_run.py --date 2026-03-27     # run for specific date
-  python scripts/daily_run.py --langs en,fr,es      # generate + post all languages
+  python scripts/daily_run.py --langs fr,en,es      # post all languages (default: FR first)
   python scripts/daily_run.py --skip-images         # skip image generation
   python scripts/daily_run.py --skip-research       # skip research sweep
-  python scripts/daily_run.py --skip-resource       # skip PDF resource build
+  python scripts/daily_run.py --skip-resource       # skip PDF resource build + Drive upload
+  python scripts/daily_run.py --skip-drive          # skip Drive upload only
   python scripts/daily_run.py --analytics           # run analytics pull at the end
   python scripts/daily_run.py --dry-run             # full run but do not post
 """
@@ -146,6 +149,15 @@ def _is_multilang_carousel(carousel_path: Path) -> bool:
         return False
 
 
+def _has_x_synthesis(carousel_path: Path) -> bool:
+    """Return True if the carousel.json has an X synthesis block."""
+    try:
+        data = json.loads(carousel_path.read_text(encoding="utf-8"))
+        return "x" in data
+    except Exception:
+        return False
+
+
 def _run_slot_slides(slot_dir: Path, script: Path, lang: str, logger: logging.Logger) -> bool:
     """Run generate_slides_py.py for one slot and one language. Returns True on success."""
     slot = slot_dir.name
@@ -218,8 +230,11 @@ def run_image_generation(
         multilang = _is_multilang_carousel(slot_dir / "carousel.json")
 
         if multilang:
-            slot_langs = langs  # use whatever was passed in (e.g. ["en","fr","es"])
-            logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} (multi-lang: {', '.join(slot_langs)})")
+            slot_langs = list(langs)  # fr, en, es
+            # Always add x if there is an X synthesis block
+            if _has_x_synthesis(slot_dir / "carousel.json") and "x" not in slot_langs:
+                slot_langs.append("x")
+            logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} (langs: {', '.join(slot_langs)})")
         else:
             slot_langs = ["en"]
             logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot}")
@@ -257,10 +272,11 @@ def run_resource_build(
     logger: logging.Logger,
 ) -> bool:
     """
-    Run build_resource.py for each slot that has a carousel.json but no resource.pdf yet.
+    Run build_resource.py --lang all for each slot that has a carousel.json.
+    Builds resource_en.pdf + resource_fr.pdf + resource_es.pdf.
     Non-blocking: if a slot fails, log and continue. Returns True if all succeed.
     """
-    header = f"[{step_num}/{total_steps}] BUILD RESOURCE PDF"
+    header = f"[{step_num}/{total_steps}] BUILD RESOURCE PDF (EN + FR + ES)"
     separator = "=" * 60
     logger.info(f"\n{separator}")
     logger.info(header)
@@ -287,23 +303,25 @@ def run_resource_build(
         logger.warning(f"  No carousel.json files found — nothing to build resources for.")
         return True
 
-    logger.info(f"  Building PDF resources for {len(slot_dirs)} slots...\n")
+    logger.info(f"  Building trilingual PDF resources for {len(slot_dirs)} slots...\n")
 
     all_ok = True
     for i, slot_dir in enumerate(slot_dirs, 1):
         slot = slot_dir.name
-        resource_pdf = slot_dir / "resource.pdf"
 
-        if resource_pdf.exists():
-            logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} — resource.pdf already exists, skipping.")
+        # Check if all three language PDFs already exist
+        existing = [l for l in ("en", "fr", "es") if (slot_dir / f"resource_{l}.pdf").exists()]
+        if len(existing) == 3:
+            logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} — all 3 PDFs already exist, skipping.")
             continue
 
-        logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} — building resource.pdf...")
+        missing = [l for l in ("en", "fr", "es") if l not in existing]
+        logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot} — building {', '.join(missing).upper()}...")
         t0 = time.time()
 
         try:
             proc = subprocess.Popen(
-                [sys.executable, str(script), "--slot-dir", str(slot_dir)],
+                [sys.executable, str(script), "--slot-dir", str(slot_dir), "--lang", "all"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -330,6 +348,90 @@ def run_resource_build(
         logger.info(f"\n  All resource PDFs completed.")
     else:
         logger.warning(f"\n  Some resource PDFs failed (non-blocking — posting will continue).")
+
+    return all_ok
+
+
+def run_drive_upload(
+    target_date: date,
+    step_num: int,
+    total_steps: int,
+    logger: logging.Logger,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Run upload_to_drive.py --all for each slot that has resource PDFs.
+    Uploads EN + FR + ES to the same Google Drive subfolder.
+    Non-blocking: if a slot fails, log and continue.
+    """
+    header = f"[{step_num}/{total_steps}] UPLOAD TO GOOGLE DRIVE (EN + FR + ES)"
+    separator = "=" * 60
+    logger.info(f"\n{separator}")
+    logger.info(header)
+    logger.info(separator)
+
+    date_str = target_date.isoformat()
+    posts_dir = ROOT / "posts" / date_str
+    script = SCRIPT_DIR / "upload_to_drive.py"
+
+    if not script.exists():
+        logger.warning(f"  upload_to_drive.py not found — skipping Drive upload.")
+        return True
+
+    if not posts_dir.exists():
+        logger.error(f"  Posts directory not found: {posts_dir}")
+        return False
+
+    slot_dirs = sorted(
+        d for d in posts_dir.iterdir()
+        if d.is_dir() and any((d / f"resource_{l}.pdf").exists() for l in ("en", "fr", "es"))
+    )
+
+    if not slot_dirs:
+        logger.warning(f"  No resource PDFs found — nothing to upload to Drive.")
+        return True
+
+    logger.info(f"  Uploading PDFs for {len(slot_dirs)} slots...\n")
+
+    all_ok = True
+    for i, slot_dir in enumerate(slot_dirs, 1):
+        slot = slot_dir.name
+        logger.info(f"  [{i}/{len(slot_dirs)}] Slot {slot}...")
+        t0 = time.time()
+
+        cmd = [sys.executable, str(script), "--slot-dir", str(slot_dir), "--all"]
+        if dry_run:
+            cmd.append("--dry-run")
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(ROOT),
+            )
+            for line in proc.stdout:
+                logger.info("    " + line.rstrip())
+            proc.wait()
+            elapsed = time.time() - t0
+
+            if proc.returncode == 0:
+                logger.info(f"    Slot {slot} Drive upload done in {elapsed:.1f}s")
+            else:
+                logger.error(f"    Slot {slot} Drive upload FAILED (exit code {proc.returncode}) — continuing")
+                all_ok = False
+
+        except Exception as e:
+            logger.error(f"    Slot {slot} Drive upload FAILED: {e} — continuing")
+            all_ok = False
+
+    if all_ok:
+        logger.info(f"\n  All Drive uploads completed.")
+    else:
+        logger.warning(f"\n  Some Drive uploads failed (non-blocking — posting will continue).")
 
     return all_ok
 
@@ -393,11 +495,6 @@ def main():
         help="Skip step 1 (research_sweep.py); use existing research data",
     )
     parser.add_argument(
-        "--skip-content",
-        action="store_true",
-        help="Skip step 2 (generate_content.py); use existing carousel.json files (Option A flow)",
-    )
-    parser.add_argument(
         "--skip-images",
         action="store_true",
         help="Skip step 3 (generate_slides_py.py); use existing slide images",
@@ -408,15 +505,21 @@ def main():
         help="Skip step 3.5 (build_resource.py); do not build PDF resources",
     )
     parser.add_argument(
+        "--skip-drive",
+        action="store_true",
+        help="Skip step 3.7 (upload_to_drive.py); do not upload PDFs to Google Drive",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Full pipeline run but pass --dry-run to posting step (no actual posts)",
     )
     parser.add_argument(
         "--langs",
-        default="en",
-        help="Comma-separated languages to generate slides and post for (default: en). "
-             "Example: --langs en,fr,es. Languages with no account configured are skipped at post time.",
+        default="fr,en,es",
+        help="Comma-separated languages for slides + posting (default: fr,en,es). "
+             "Order controls posting sequence: FR posts first at slot time, EN +60 min, ES +120 min. "
+             "LinkedIn and X always post EN only regardless of this setting.",
     )
     parser.add_argument(
         "--analytics",
@@ -437,8 +540,6 @@ def main():
     logger.info(f"  CAROUSEL PIPELINE  |  {date_str}")
     if args.dry_run:
         logger.info("  MODE: DRY RUN (no posts will be created)")
-    if args.skip_content:
-        logger.info("  FLOW: Option A — Claude writes content (skip-content)")
     logger.info(f"{'#'*60}")
 
     pipeline_start = time.time()
@@ -448,12 +549,13 @@ def main():
     active_steps = []
     if not args.skip_research:
         active_steps.append("research")
-    if not args.skip_content:
-        active_steps.append("content")
+    active_steps.append("content")  # validate carousel.json files
     if not args.skip_images:
         active_steps.append("images")
     if not args.skip_resource:
         active_steps.append("resource")
+    if not args.skip_resource and not args.skip_drive:
+        active_steps.append("drive")
     active_steps.append("post")
     if args.analytics:
         active_steps.append("analytics")
@@ -494,23 +596,24 @@ def main():
         logger.info("\n[SKIPPED] Research sweep (--skip-research)")
         results["[1] Research Sweep"] = True
 
-    # ── Step 2: Generate content ──────────────────────────────────────────────
-    if not args.skip_content:
-        step_num += 1
-        ok = run_step(
-            step_num, total,
-            "GENERATE CONTENT (OpenAI)",
-            [sys.executable, str(SCRIPT_DIR / "generate_content.py"), "--date", date_str],
-            logger,
-        )
-        results["[2] Generate Content"] = ok
-        if not ok:
-            logger.error("\nPipeline stopped at content generation.")
-            print_summary(target_date, results, logger)
-            sys.exit(1)
-    else:
-        logger.info("\n[SKIPPED] Content generation (--skip-content) — Option A: using existing carousel.json files")
-        results["[2] Generate Content"] = True
+    # ── Step 2: Validate content (generated by Claude Code directly) ─────────
+    step_num += 1
+    validate_cmd = [
+        sys.executable, str(SCRIPT_DIR / "generate_content.py"),
+        "--date", date_str,
+        "--validate",
+    ]
+    ok = run_step(
+        step_num, total,
+        "VALIDATE CONTENT (carousel.json files)",
+        validate_cmd,
+        logger,
+    )
+    results["[2] Validate Content"] = ok
+    if not ok:
+        logger.error("\nContent validation failed — run Claude Code to generate carousel.json files first.")
+        print_summary(target_date, results, logger)
+        sys.exit(1)
 
     # ── Step 3: Generate slides (images) ─────────────────────────────────────
     if not args.skip_images:
@@ -532,10 +635,22 @@ def main():
         results["[3.5] Build Resource PDF"] = ok
         # Non-blocking: do not sys.exit on failure, continue to posting
         if not ok:
-            logger.warning("\n  Resource build had errors — pipeline continues to posting.")
+            logger.warning("\n  Resource build had errors — pipeline continues.")
     else:
         logger.info("\n[SKIPPED] Resource PDF build (--skip-resource)")
         results["[3.5] Build Resource PDF"] = True
+
+    # ── Step 3.7: Upload PDFs to Google Drive ────────────────────────────────
+    if not args.skip_resource and not args.skip_drive:
+        step_num += 1
+        ok = run_drive_upload(target_date, step_num, total, logger, dry_run=args.dry_run)
+        results["[3.7] Upload to Google Drive"] = ok
+        if not ok:
+            logger.warning("\n  Drive upload had errors — pipeline continues to posting.")
+    else:
+        reason = "--skip-resource" if args.skip_resource else "--skip-drive"
+        logger.info(f"\n[SKIPPED] Google Drive upload ({reason})")
+        results["[3.7] Upload to Google Drive"] = True
 
     # ── Step 4: Post to PostFast (one run per language) ──────────────────────
     step_num += 1

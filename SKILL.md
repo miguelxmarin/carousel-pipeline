@@ -2,17 +2,17 @@
 name: carousel-pipeline
 description: >
   Automated viral carousel content pipeline for personal brand creators.
+  Stack: Claude Code (content brain) + Pinterest via Chrome (photography) + PostFast (scheduling).
   Generates carousel posts using The Carousel Method, real Pinterest photography,
-  smart per-slide text overlays, posts directly to TikTok and Instagram via PostFast,
-  builds a PDF resource for every carousel CTA, uploads PDFs to Google Drive,
-  and runs a self-improving analytics feedback loop powered by PostFast analytics.
-  White-label: works for any creator in any niche. Language and post frequency
-  are configured during onboarding. Supports single-language or multilingual (EN/FR/ES) modes.
+  smart per-slide text overlays via Pillow, posts to TikTok/Instagram/LinkedIn/X via PostFast.
+  Builds a PDF resource for every carousel CTA. Runs a self-improving analytics feedback loop.
+  Multilingual: FR first, then EN (+60 min), then ES (+120 min) on TikTok and Instagram.
+  LinkedIn and X post EN only. 2 slots/day × 8 platform-language combos = 16 publications/day.
   Use whenever a creator wants to automate social content, generate viral carousels,
   grow on TikTok or Instagram, or build a hands-free content machine.
   Trigger on: automate content, carousel posts, TikTok growth, Instagram reach,
   viral content, content pipeline, personal brand automation, build resource, PDF resource,
-  analytics feedback loop, hook performance, learned rules, Google Drive upload.
+  analytics feedback loop, hook performance, learned rules.
 ---
 
 # Carousel Pipeline -- White-Label Automated Content Machine
@@ -25,19 +25,26 @@ The scripts handle infrastructure. You handle intelligence.
 
 ## WHAT THIS SYSTEM DOES
 
-This is a **daily automated content machine** for TikTok and Instagram carousels.
+This is a **daily automated content machine** for TikTok, Instagram, LinkedIn, and X carousels.
+
+**The full stack — nothing else:**
+- **Claude Code** — content brain (research, write carousel.json, X synthesis, FR/ES translation)
+- **Pinterest** (Chrome browser) — real photography, one photo per slide
+- **PostFast** — scheduling to all platforms via API
 
 Every day it:
 1. **Researches** fresh audience friction + trending AI topics via WebSearch
-2. **Writes** 5 carousel posts using The Carousel Method (9-slide structure, hook formulas, swipe triggers) — all 3 languages in one pass
-3. **Builds** a branded PDF resource for every post's CTA ("Comment WORD — I'll send you the PDF") via build_resource.py
-4. **Fetches** real photography from Pinterest (9 photos per slot × 5 slots = 45 images/day) via Chrome browsing
-5. **Generates** 135 slides/day (5 slots × 9 slides × 3 languages) with smart text overlays via Pillow
-6. **Schedules** 15 posts/day to TikTok + Instagram via PostFast (EN/FR/ES staggered per slot)
-7. **Measures** performance via PostFast analytics (views, likes, comments, saves, shares)
+2. **Writes** 2 carousel posts (EN + FR + ES + X synthesis) using The Carousel Method — Claude Code writes carousel.json directly, no external AI API
+3. **Builds** a branded PDF resource for every post's CTA ("Comment WORD — I'll send you the PDF")
+4. **Fetches** real photography from Pinterest (9 photos per slot via Chrome browsing + `fetch_backgrounds.py`)
+5. **Generates** slides with smart text overlays via Pillow (`generate_slides_py.py --lang en/fr/es/x`)
+6. **Schedules** 16 posts/day via PostFast: FR first at slot time → EN +60 min → ES +120 min (TikTok + Instagram); LinkedIn EN only; X EN 4-slide synthesis
+7. **Measures** performance via PostFast analytics
 8. **Learns** which hooks, structures, and CTA words work — feeds rules back into tomorrow's content
 
-**Output:** 5 topics × 3 languages (EN/FR/ES) = 15 fully produced carousel posts per day, each with a PDF resource, scheduled automatically across TikTok and Instagram.
+**Output per day:**
+- 2 topics × (TikTok FR+EN+ES + Instagram FR+EN+ES + LinkedIn EN + X EN) = **16 publications/day**
+- Each with a PDF resource, all scheduled automatically
 
 ---
 
@@ -46,14 +53,14 @@ Every day it:
 **Any personal brand creator** in a high-value niche — finance, fitness, productivity, AI, business, tech — who posts carousel content on TikTok and Instagram and wants to systematize production.
 
 **To set up for a new creator:**
-Run `node scripts/onboarding.js` — it interviews the creator, configures all API keys, sets language preference, and writes `config.json`. Takes 5 minutes.
+Edit `config.json` — set creator profile, PostFast API key + account IDs, posting times and timezone.
 
-**Language modes (set during onboarding):**
-- **Single-language**: post in EN, FR, or ES only. N posts/day × 1 language.
-- **Multilingual**: post EN + FR + ES. N posts/day × 3 languages. FR +3 min, ES +6 min staggered.
+**Platform routing:**
+- TikTok + Instagram: FR first (slot time) → EN (+60 min) → ES (+120 min)
+- LinkedIn: EN only (at slot time)
+- X: EN only (4-slide original synthesis, at slot time)
 
-`config.json → posting.postingLanguage` controls which language is the default.
-`config.json → posting.multilingualEnabled` controls whether all 3 versions are posted.
+**Posting offsets are in `config.json → postfast.languages.{lang}.offsetMinutes`.**
 
 ---
 
@@ -63,63 +70,85 @@ Run `node scripts/onboarding.js` — it interviews the creator, configures all A
 
 | Step | Automated? | Notes |
 |------|-----------|-------|
-| Research (5 topics/day) | YES | Claude uses WebSearch — no external API needed |
-| Content writing | YES | Claude writes `carousel.json` + `resource.json` for all 5 slots in EN/FR/ES |
+| Research (2 topics/day) | YES | Claude uses WebSearch — no external API needed |
+| Content writing | YES | Claude Code writes `carousel.json` directly in the conversation — EN + FR + ES + X synthesis |
 | PDF resource build | YES | `build_resource.py` renders `resource.json` → `resource.pdf` per slot |
-| Pinterest background fetch | YES | Claude browses Pinterest via Chrome, picks 9 photos/slot, `fetch_backgrounds.py` downloads |
-| Slide rendering | YES | `generate_slides_py.py` -- Pillow overlays text on Pinterest photos |
-| Posting to TikTok + Instagram | YES | `post_to_postfast.py` -- language from config, or override with `--lang` |
-| Google Drive PDF upload | YES | Claude browses drive.google.com via Chrome -- no API key needed. Sets "Anyone with the link" sharing so anyone can view + download without a Google account. |
-| Analytics pull | YES | `analytics_pull.py` -- PostFast `/social-posts/analytics` |
+| Pinterest background fetch | SEMI | Claude browses Pinterest via Chrome browser extension, picks 9 photos/slot — `fetch_backgrounds.py` downloads them |
+| Slide rendering | YES | `generate_slides_py.py` — Pillow overlays text on Pinterest photos (runs per lang: en, fr, es, x) |
+| Google Drive PDF upload | YES | `upload_to_drive.py` — uploads resource.pdf, sets "Anyone with the link" sharing, saves link to carousel.json. One-time OAuth setup (~3 min). |
+| Posting to all platforms | YES | `post_to_postfast.py` — PostFast API handles TikTok, Instagram, LinkedIn, X with correct offsets |
+| Analytics pull | YES | `analytics_pull.py` — PostFast `/social-posts/analytics` |
 | Feedback loop | YES | `hook-performance.json` auto-updates with learned rules for next day |
 | Daily scheduling | YES | Claude scheduled task runs at 5:00 AM every day — fully hands-free |
-| Multilingual posting | OPTIONAL | Enabled in config: FR posts +3min, ES +6min after primary slot |
-
-**What is missing for full automation:**
-1. Windows Task Scheduler / cron job to run `daily_run.py` daily at a set time
 
 ---
 
 ## HOW TO RUN
 
 ```bash
-# FIRST-TIME SETUP (one per creator)
-node scripts/onboarding.js       # sets language, posts/day, API keys, Google Drive
+# ── DAILY FLOW ──────────────────────────────────────────────────────────────
 
-# THE CURRENT FLOW (Claude does everything -- content + Pinterest browsing)
-# Step 1: Claude researches topic (WebSearch), writes carousel.json + resource.json
-# Step 2: Claude browses Pinterest via Chrome, picks 9 photos per slot
-# Step 3: fetch_backgrounds.py downloads the Pinterest photos
-# Step 4: Run slides + post -- content and backgrounds already ready
+# Step 1 — Research (Claude WebSearch → research/YYYY-MM-DD.json)
+python scripts/research_sweep.py --date YYYY-MM-DD
+
+# Step 2 — Content (Claude Code writes carousel.json directly in this conversation)
+#   Claude reads research, writes EN carousel + FR/ES translations + X synthesis
+#   Output: posts/YYYY-MM-DD/0730/carousel.json  +  posts/YYYY-MM-DD/1300/carousel.json
+#   Validate after writing:
+python scripts/generate_content.py --date YYYY-MM-DD --validate
+
+# Step 3 — Pinterest backgrounds (Claude opens Chrome, searches each bgQuery)
+#   See what to search:
+python scripts/fetch_backgrounds.py --slot-dir posts/YYYY-MM-DD/HHMM --list
+python scripts/fetch_backgrounds.py --slot-dir posts/YYYY-MM-DD/HHMM --list --lang x
+#   Save each image Claude finds:
+python scripts/fetch_backgrounds.py --slot-dir posts/YYYY-MM-DD/HHMM --slide N --url https://i.pinimg.com/...
+python scripts/fetch_backgrounds.py --slot-dir posts/YYYY-MM-DD/HHMM --slide N --url https://i.pinimg.com/... --lang x
+#   Or save all at once from a JSON map:
+python scripts/fetch_backgrounds.py --slot-dir posts/YYYY-MM-DD/HHMM --map '{"1":"https://...","2":"https://..."}'
+
+# Step 4 — Generate slides (Pillow text overlays, one lang at a time)
 python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang en
-python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang fr  # if multilingual
-python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang es  # if multilingual
-python scripts/post_to_postfast.py --date YYYY-MM-DD --now             # uses config language
-python scripts/post_to_postfast.py --date YYYY-MM-DD --lang fr --now  # override language
-python scripts/build_resource.py --slot-dir posts/YYYY-MM-DD/HHMM     # build PDF
-python scripts/upload_to_drive.py --slot-dir posts/YYYY-MM-DD/HHMM    # prep Drive upload brief, then Claude uploads via Chrome
+python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang fr
+python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang es
+python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM --lang x
 
-# WITH ANALYTICS at the end
-python scripts/daily_run.py --date YYYY-MM-DD --skip-research --skip-content --analytics
+# Step 5 — Build PDF resource
+python scripts/build_resource.py --slot-dir posts/YYYY-MM-DD/HHMM
 
-# MULTI-LANGUAGE (when FR/ES accounts are configured)
-python scripts/daily_run.py --date YYYY-MM-DD --skip-research --skip-content --langs en,fr,es
+# Step 5b — Upload PDF to Google Drive (get shareable link)
+python scripts/upload_to_drive.py --slot-dir posts/YYYY-MM-DD/HHMM
 
-# INDIVIDUAL STEPS
-python scripts/research_sweep.py --date YYYY-MM-DD          # research only
-python scripts/generate_slides_py.py posts/YYYY-MM-DD/HHMM  # one slot's slides
-python scripts/build_resource.py --slot-dir posts/YYYY-MM-DD/HHMM  # one slot's PDF
-python scripts/post_to_postfast.py --date YYYY-MM-DD         # post all 5 slots (EN)
-python scripts/post_to_postfast.py --date YYYY-MM-DD --lang fr  # post all slots (FR)
-python scripts/post_to_postfast.py --slot 0600 --now         # post one slot immediately
-python scripts/analytics_pull.py                             # pull last 30 days of metrics
-python scripts/analytics_pull.py --since YYYY-MM-DD --force  # re-pull with fresh metrics
+# Step 6 — Post (all langs, scheduled — FR first, EN +60min, ES +120min)
+python scripts/post_to_postfast.py --date YYYY-MM-DD --lang fr
+python scripts/post_to_postfast.py --date YYYY-MM-DD --lang en
+python scripts/post_to_postfast.py --date YYYY-MM-DD --lang es
 
-# DRY RUN (validate everything without posting)
-python scripts/daily_run.py --date YYYY-MM-DD --skip-research --skip-content --dry-run
+# ── SHORTCUTS ───────────────────────────────────────────────────────────────
 
-# TESTING RULE: When asked to test the system, only generate ONE slot.
-# Do not generate all 10. One slot is enough to verify the pipeline.
+# Full pipeline run (steps 1-6 in one command)
+python scripts/daily_run.py --date YYYY-MM-DD
+
+# Dry run (everything except actual posting)
+python scripts/daily_run.py --date YYYY-MM-DD --dry-run
+
+# Skip research (content already written)
+python scripts/daily_run.py --date YYYY-MM-DD --skip-research
+
+# Skip slide generation (slides already exist)
+python scripts/daily_run.py --date YYYY-MM-DD --skip-images
+
+# Post one slot immediately (right now, no scheduling)
+python scripts/post_to_postfast.py --slot 0730 --now --lang fr
+
+# Post one specific slot for one language
+python scripts/post_to_postfast.py --date YYYY-MM-DD --slot 0730 --lang en
+
+# Pull analytics
+python scripts/analytics_pull.py
+
+# TESTING RULE: When asked to test the pipeline, use ONE slot only.
+# One slot is enough to verify the full pipeline end to end.
 ```
 
 ---
@@ -127,19 +156,31 @@ python scripts/daily_run.py --date YYYY-MM-DD --skip-research --skip-content --d
 ## THE PIPELINE FLOW
 
 ```
-research sweep (WebSearch for audience friction + trending topics)
-    -> read hook-performance.json (learned rules)
-        -> write carousel.json + resource.json (Claude — EN always + FR/ES if multilingual)
-            -> browse Pinterest via Chrome (Claude picks 9 photos per slot)
-                -> fetch_backgrounds.py (downloads + crops to 1080x1350)
-                    -> generate_slides_py.py (Pillow overlays text on photos)
-                        -> build_resource.py (renders resource.json to PDF)
-                            -> upload_to_drive.py (uploads PDF to Google Drive)
-                                -> post_to_postfast.py (posts in config language, or all 3 if multilingual)
-                                    -> pull analytics (PostFast /social-posts/analytics)
-                                        -> update hook-performance.json
-                                            -> feed learned rules back to next session
+research_sweep.py (WebSearch — audience friction + trending AI topics)
+    → read hook-performance.json (learned rules from past posts)
+        → Claude Code writes carousel.json (EN + FR + ES + X synthesis, 2 slots)
+            → generate_content.py --validate (confirm structure is correct)
+                → fetch_backgrounds.py --list (show bgQuery for each slide)
+                    → Claude opens Pinterest in Chrome, finds best photo per slide
+                        → fetch_backgrounds.py --slide N --url URL (download + crop)
+                            → generate_slides_py.py --lang en/fr/es/x (Pillow overlays)
+                                → build_resource.py (resource.json → resource.pdf)
+                                    → upload_to_drive.py (upload PDF → shareable Drive link → saved to carousel.json)
+                                        → post_to_postfast.py --lang fr (FR first at slot time)
+                                    → post_to_postfast.py --lang en (EN +60 min)
+                                    → post_to_postfast.py --lang es (ES +120 min)
+                                        → analytics_pull.py (PostFast metrics)
+                                            → update hook-performance.json
+                                                → learned rules feed into tomorrow's session
 ```
+
+**Platform schedule per slot:**
+```
+Slot time (e.g. 07:30)  →  TikTok FR + Instagram FR + LinkedIn EN + X EN
+Slot time + 60 min      →  TikTok EN + Instagram EN
+Slot time + 120 min     →  TikTok ES + Instagram ES
+```
+**Total: 2 slots × 8 publications = 16 posts/day**
 
 **Three intelligence inputs feed every carousel:**
 1. `research/YYYY-MM-DD.json` -- what the audience is saying right now
@@ -209,27 +250,40 @@ Do not override them in content decisions. The renderer enforces them.
 - Right edge dead zone: last 13% of frame — platform UI buttons live there.
 - Text block must fit above `H - 140px` footer reserve.
 
-**Google Drive (browser-based — no API key required):**
+**Google Drive (API-based — fully automated):**
 
-Upload works the same way as Pinterest background fetching: Claude browses drive.google.com via Chrome.
-No OAuth tokens, no Google Cloud Console setup, no credentials files needed.
-Only requirement: Chrome must be open and logged into Google Drive.
+Uses Google Drive API v3 with OAuth2. No browser interaction required after one-time setup.
 
-After `build_resource.py`, Claude runs `upload_to_drive.py` to get the upload brief, then:
-1. Opens `drive.google.com` in Chrome
-2. Finds or creates root folder: `CLAUDE AGENT CAROUSEL PDFS`
-3. Creates subfolder: `YYYY-MM-DD -- topic-slug [CTAWORD]`
-4. Uploads `resource.pdf` by dragging or using the New > File Upload button
-5. Opens Share settings on the uploaded file
-6. Changes access from "Restricted" to **"Anyone with the link"**
-7. Sets role to **"Viewer"** (allows both viewing AND downloading without a Google account)
-8. Copies the shareable link — format: `https://drive.google.com/file/d/FILE_ID/view?usp=sharing`
-9. Returns the link to be stored in `carousel.json` under `meta.resourceLink`
+**One-time setup (~3 minutes):**
+1. Go to https://console.cloud.google.com
+2. Create a project → Enable the **Google Drive API**
+   (APIs & Services → Library → search "Google Drive API" → Enable)
+3. Create OAuth credentials:
+   APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID → Desktop app → Download JSON
+4. Save the downloaded file as: `credentials/google_oauth_credentials.json`
+5. Run once: `python scripts/upload_to_drive.py --slot-dir posts/YYYY-MM-DD/HHMM`
+   Browser opens → sign in → click Allow → `credentials/token.json` saved → done forever
+
+**What it does automatically (every run after setup):**
+1. Finds or creates root folder: `CLAUDE AGENT CAROUSEL PDFS`
+2. Finds or creates subfolder: `YYYY-MM-DD -- topic-slug [CTAWORD]`
+3. Uploads `resource.pdf`
+4. Sets sharing to **"Anyone with the link — Viewer"** (no Google account needed to view or download)
+5. Saves the shareable link to `carousel.json` under `meta.resourceLink`
 
 **Sharing rule (non-negotiable):**
-The link MUST be set to "Anyone with the link -- Viewer" before returning it.
-This ensures the link can be sent to anyone (via DM, comment reply, email) and they can
-open and download the PDF without being logged into Google. Never use "Restricted" sharing.
+The link MUST be set to "Anyone with the link -- Viewer".
+This ensures it can be sent to anyone (DM, comment reply, email) without requiring a Google login.
+
+**After upload — always output the link for easy copy-paste:**
+```
+Resource PDF link (copy-paste ready):
+https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+```
+
+**Security:**
+`credentials/google_oauth_credentials.json` and `credentials/token.json` are gitignored.
+Never commit them. Never share them. The `credentials/.gitignore` excludes all `*.json`.
 
 ---
 
