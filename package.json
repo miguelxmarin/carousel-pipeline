@@ -1,0 +1,31 @@
+{
+  "name": "carousel-pipeline",
+  "version": "2.0.0",
+  "description": "Automated carousel content pipeline — research → generate → post → leads",
+  "main": "scripts/daily-run.js",
+  "scripts": {
+    "setup":    "node scripts/onboarding.js",
+    "daily":    "node scripts/daily-run.js",
+    "research": "node scripts/research-sweep.js",
+    "generate": "node scripts/generate-carousel.js",
+    "resource": "node scripts/generate-resource.js",
+    "images":   "node scripts/generate-slides.js",
+    "overlay":  "node scripts/add-text-overlay.js",
+    "post":     "node scripts/post-to-platforms.js",
+    "report":   "node scripts/daily-report.js --connect --days 3",
+    "dry-run":  "node scripts/daily-run.js --skip-analytics --skip-post"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "notes": {
+    "canvas-macos":   "brew install pkg-config cairo pango libpng jpeg giflib librsvg && npm install",
+    "canvas-ubuntu":  "sudo apt-get install build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev && npm install",
+    "canvas-windows": "npm install (auto-downloads prebuilt binaries)",
+    "no-postiz":      "Posts go directly to TikTok + Instagram via their official APIs. Free, no third party.",
+    "tiktok-music":   "TikTok auto-adds trending music via auto_add_music=true. Zero manual steps."
+  }
+}

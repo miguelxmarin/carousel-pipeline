@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>@yourcreator — Carousel Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; font-family: 'Poppins', sans-serif; color: #fff; }
+  header {
+    padding: 24px 40px;
+    background: #0a0a0a;
+    border-bottom: 1px solid #222;
+    display: flex; align-items: center; gap: 16px;
+  }
+  header span { color: #c8a84b; font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; }
+  header h1 { font-size: 18px; font-weight: 700; }
+  .caption-box {
+    margin: 32px auto;
+    max-width: 900px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 24px 28px;
+  }
+  .caption-box h2 { font-size: 13px; color: #c8a84b; letter-spacing: 2px; margin-bottom: 12px; text-transform: uppercase; }
+  .caption-box p { font-size: 15px; color: #bbb; line-height: 1.7; white-space: pre-wrap; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    max-width: 1100px;
+    margin: 0 auto 60px;
+    padding: 0 20px;
+  }
+  .slide-card {
+    background: #1a1a1a;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #222;
+    transition: transform .2s, border-color .2s;
+    cursor: pointer;
+  }
+  .slide-card:hover { transform: translateY(-4px); border-color: #c8a84b55; }
+  .slide-card img { width: 100%; display: block; }
+  .slide-meta {
+    padding: 12px 16px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .slide-num { font-size: 12px; color: #c8a84b; font-weight: 700; letter-spacing: 1px; }
+  .slide-role { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Lightbox */
+  .lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:999; align-items:center; justify-content:center; }
+  .lightbox.active { display:flex; }
+  .lightbox img { max-height: 92vh; max-width: 92vw; border-radius: 8px; }
+  .lb-close { position:fixed; top:20px; right:28px; font-size:32px; cursor:pointer; color:#aaa; }
+  .lb-nav { position:fixed; top:50%; transform:translateY(-50%); font-size:40px; cursor:pointer; color:#c8a84b; user-select:none; padding:0 20px; }
+  #lb-prev { left:0; }
+  #lb-next { right:0; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>@yourcreator</span>
+  <h1>Carousel Preview — 2026-03-26 · 06:00</h1>
+</header>
+
+<div class="caption-box">
+  <h2>Caption</h2>
+  <p>Most people treat AI like a search engine. That's why their results feel generic.
+
+The shift: give it context, not just questions — and watch what changes.
+
+Comment PARTNER and I'll send you the full prompt framework.
+
+#AI #AItools #makemoneyonline #vibecoding #artificialintelligence</p>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="lightbox" id="lightbox">
+  <span class="lb-close" onclick="closeLb()">×</span>
+  <span class="lb-nav" id="lb-prev" onclick="navLb(-1)">‹</span>
+  <img id="lb-img" src="" alt=""/>
+  <span class="lb-nav" id="lb-next" onclick="navLb(1)">›</span>
+</div>
+
+<script>
+const slides = [
+  { num:1,  role:"HOOK",         file:"slide_01.jpg" },
+  { num:2,  role:"CONTEXT",      file:"slide_02.jpg" },
+  { num:3,  role:"PATTERN BREAK",file:"slide_03.jpg" },
+  { num:4,  role:"INSIGHT 1",    file:"slide_04.jpg" },
+  { num:5,  role:"INSIGHT 2",    file:"slide_05.jpg" },
+  { num:6,  role:"INSIGHT 3",    file:"slide_06.jpg" },
+  { num:7,  role:"INSIGHT 4",    file:"slide_07.jpg" },
+  { num:8,  role:"TRANSFORM",    file:"slide_08.jpg" },
+  { num:9,  role:"CTA",          file:"slide_09.jpg" },
+  { num:10, role:"LOOP CLOSE",   file:"slide_10.jpg" },
+];
+
+const grid = document.getElementById('grid');
+slides.forEach((s, i) => {
+  const card = document.createElement('div');
+  card.className = 'slide-card';
+  card.innerHTML = `
+    <img src="posts/2026-03-26/0600/slides/${s.file}" alt="Slide ${s.num}" loading="lazy"/>
+    <div class="slide-meta">
+      <span class="slide-num">SLIDE ${String(s.num).padStart(2,'0')}</span>
+      <span class="slide-role">${s.role}</span>
+    </div>`;
+  card.addEventListener('click', () => openLb(i));
+  grid.appendChild(card);
+});
+
+let current = 0;
+function openLb(i) {
+  current = i;
+  document.getElementById('lb-img').src = `posts/2026-03-26/0600/slides/${slides[i].file}`;
+  document.getElementById('lightbox').classList.add('active');
+}
+function closeLb() { document.getElementById('lightbox').classList.remove('active'); }
+function navLb(dir) {
+  current = (current + dir + slides.length) % slides.length;
+  document.getElementById('lb-img').src = `posts/2026-03-26/0600/slides/${slides[current].file}`;
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLb();
+  if (e.key === 'ArrowRight') navLb(1);
+  if (e.key === 'ArrowLeft') navLb(-1);
+});
+</script>
+</body>
+</html>

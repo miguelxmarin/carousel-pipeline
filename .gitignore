@@ -1,0 +1,43 @@
+# ── CREDENTIALS & API KEYS (NEVER COMMIT) ─────────────────────────────────────
+config.json
+credentials/google-credentials.json
+credentials/google-token.json
+.env
+.env.local
+.env.*
+
+# ── GENERATED CONTENT (recreatable, contains personal data) ───────────────────
+posts/
+research/
+reports/
+competitor-research.json
+
+# ── ANALYTICS & PERFORMANCE DATA (contains real post IDs + metrics) ───────────
+hook-performance.json
+
+# ── LOGS ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── PYTHON ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── NODE ──────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ── SYSTEM ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+.cache/
